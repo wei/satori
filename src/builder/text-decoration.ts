@@ -1,18 +1,20 @@
-import { buildXMLString } from '../utils'
+import { buildXMLString } from '../utils.js'
 
-export default function decoration(
+export default function buildDecoration(
   {
     width,
     left,
     top,
     ascender,
     clipPathId,
+    matrix,
   }: {
     width: number
     left: number
     top: number
     ascender: number
     clipPathId?: string
+    matrix?: string
   },
   style: Record<string, any>
 ) {
@@ -21,6 +23,7 @@ export default function decoration(
     textDecorationStyle,
     textDecorationLine,
     fontSize,
+    color,
   } = style
   if (!textDecorationLine || textDecorationLine === 'none') return ''
 
@@ -30,7 +33,7 @@ export default function decoration(
 
   const y =
     textDecorationLine === 'line-through'
-      ? top + ascender * 0.5
+      ? top + ascender * 0.7
       : textDecorationLine === 'underline'
       ? top + ascender * 1.1
       : top
@@ -42,15 +45,19 @@ export default function decoration(
       ? `0 ${height * 2}`
       : undefined
 
-  return buildXMLString('line', {
-    x1: left,
-    y1: y,
-    x2: left + width,
-    y2: y,
-    stroke: textDecorationColor,
-    'stroke-width': height,
-    'stroke-dasharray': dasharray,
-    'stroke-linecap': textDecorationStyle === 'dotted' ? 'round' : 'square',
-    'clip-path': clipPathId ? `url(#${clipPathId})` : undefined,
-  })
+  return (
+    (clipPathId ? `<g clip-path="url(#${clipPathId})">` : '') +
+    buildXMLString('line', {
+      x1: left,
+      y1: y,
+      x2: left + width,
+      y2: y,
+      stroke: textDecorationColor || color,
+      'stroke-width': height,
+      'stroke-dasharray': dasharray,
+      'stroke-linecap': textDecorationStyle === 'dotted' ? 'round' : 'square',
+      transform: matrix,
+    }) +
+    (clipPathId ? '</g>' : '')
+  )
 }

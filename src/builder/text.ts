@@ -1,6 +1,7 @@
-import type { ParsedTransformOrigin } from '../transform-origin'
-import transform from './transform'
-import { buildXMLString } from '../utils'
+import escapeHTML from 'escape-html'
+import type { ParsedTransformOrigin } from '../transform-origin.js'
+import transform from './transform.js'
+import { buildXMLString } from '../utils.js'
 
 export function container(
   {
@@ -42,7 +43,7 @@ export function container(
   return { matrix, opacity }
 }
 
-export default function text(
+export default function buildText(
   {
     id,
     content,
@@ -131,6 +132,14 @@ export default function text(
     transform: matrix || undefined,
     'clip-path': clipPathId ? `url(#${clipPathId})` : undefined,
     style: style.filter ? `filter:${style.filter}` : undefined,
+    'stroke-width': style.WebkitTextStrokeWidth
+      ? `${style.WebkitTextStrokeWidth}px`
+      : undefined,
+    stroke: style.WebkitTextStrokeWidth
+      ? style.WebkitTextStrokeColor
+      : undefined,
+    'stroke-linejoin': style.WebkitTextStrokeWidth ? 'round' : undefined,
+    'paint-order': style.WebkitTextStrokeWidth ? 'stroke' : undefined,
   }
   return [
     (filter ? `${filter}<g filter="url(#satori_s-${id})">` : '') +
@@ -141,11 +150,11 @@ export default function text(
           fill: style.color,
           opacity: opacity !== 1 ? opacity : undefined,
         },
-        content
+        escapeHTML(content)
       ) +
       (decorationShape || '') +
       (filter ? '</g>' : '') +
       extra,
-    shape ? buildXMLString('text', shapeProps, content) : '',
+    shape ? buildXMLString('text', shapeProps, escapeHTML(content)) : '',
   ]
 }

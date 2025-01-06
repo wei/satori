@@ -1,14 +1,27 @@
-let Yoga: typeof import('yoga-layout')
+import type { Yoga } from 'yoga-wasm-web'
 
-import YogaMod from '@yoga'
+let yogaInstance: Yoga
 
-// @ts-ignore
-Yoga = YogaMod.default || YogaMod
-
-export function init(yoga: typeof Yoga) {
-  Yoga = yoga
+export function init(yoga: Yoga) {
+  yogaInstance = yoga
 }
 
-export default function getYoga(): typeof Yoga {
-  return Yoga
+let initializationPromise = null
+
+export default async function getYoga(): Promise<Yoga> {
+  if (yogaInstance) return yogaInstance
+
+  if (initializationPromise) {
+    await initializationPromise
+    return yogaInstance
+  }
+
+  initializationPromise = import('@yoga')
+    .then((mod) => mod.getYogaModule())
+    .then((yoga) => (yogaInstance = yoga))
+
+  await initializationPromise
+  initializationPromise = null
+
+  return yogaInstance
 }

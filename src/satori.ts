@@ -1,12 +1,16 @@
 import type { ReactNode } from 'react'
+import type { TwConfig } from 'twrnc'
+import type { SatoriNode } from './layout.js'
 
-import getYoga, { init } from './yoga'
-import layout from './layout'
-import FontLoader, { FontOptions } from './font'
-import svg from './builder/svg'
-import { segment } from './utils'
-import { detectLanguageCode, LangCode, Locale } from './language'
-import getTw from './handler/tailwind'
+import getYoga, { init } from './yoga/index.js'
+import layout from './layout.js'
+import FontLoader, { FontOptions } from './font.js'
+import svg from './builder/svg.js'
+import { segment } from './utils.js'
+import { detectLanguageCode, LangCode, Locale } from './language.js'
+import getTw from './handler/tailwind.js'
+import { preProcessNode } from './handler/preprocess.js'
+import { cache, inflightRequests } from './handler/image.js'
 
 // We don't need to initialize the opentype instances every time.
 const fontCache = new WeakMap()
@@ -30,8 +34,11 @@ export type SatoriOptions = (
   loadAdditionalAsset?: (
     languageCode: string,
     segment: string
-  ) => Promise<FontOptions | string | undefined>
+  ) => Promise<string | Array<FontOptions>>
+  tailwindConfig?: TwConfig
+  onNodeDetected?: (node: SatoriNode) => void
 }
+export type { SatoriNode }
 
 export { init }
 
@@ -39,7 +46,7 @@ export default async function satori(
   element: ReactNode,
   options: SatoriOptions
 ): Promise<string> {
-  const Yoga = getYoga()
+  const Yoga = await getYoga()
   if (!Yoga || !Yoga.Node) {
     throw new Error(
       'Satori is not initialized: expect `yoga` to be loaded, got ' + Yoga
@@ -82,6 +89,10 @@ export default async function satori(
   // To address this situation, we may need to add `processedWordsMissingFont`
   const processedWordsMissingFonts = new Set()
 
+  cache.clear()
+  inflightRequests.clear()
+  await preProcessNode(element)
+
   const handler = layout(element, {
     id: 'id',
     parentStyle: {},
@@ -90,7 +101,7 @@ export default async function satori(
       fontWeight: 'normal',
       fontFamily: 'serif',
       fontStyle: 'normal',
-      lineHeight: 1.2,
+      lineHeight: 'normal',
       color: 'black',
       opacity: 1,
       whiteSpace: 'normal',
@@ -105,10 +116,12 @@ export default async function satori(
     debug: options.debug,
     graphemeImages,
     canLoadAdditionalAssets: !!options.loadAdditionalAsset,
+    onNodeDetected: options.onNodeDetected,
     getTwStyles: (tw, style) => {
       const twToStyles = getTw({
         width: definedWidth,
         height: definedHeight,
+        config: options.tailwindConfig,
       })
       const twStyles = { ...twToStyles([tw] as any) }
       if (typeof twStyles.lineHeight === 'number') {
@@ -144,13 +157,20 @@ export default async function satori(
               return null
             }
             processedWordsMissingFonts.add(key)
-            return options.loadAdditionalAsset(code, _segment).then((asset) => {
-              if (typeof asset === 'string') {
-                images[_segment] = asset
-              } else if (asset) {
-                fonts.push(asset)
-              }
-            })
+
+            return options
+              .loadAdditionalAsset(code, _segment)
+              .then((asset: any) => {
+                if (typeof asset === 'string') {
+                  images[_segment] = asset
+                } else if (asset) {
+                  if (Array.isArray(asset)) {
+                    fonts.push(...asset)
+                  } else {
+                    fonts.push(asset)
+                  }
+                }
+              })
           })
         )
       )
@@ -180,8 +200,8 @@ function convertToLanguageCodes(
   const languageCodes = {}
   let wordsByCode = {}
 
-  for (let { word, locale } of segmentsMissingFont) {
-    const code = detectLanguageCode(word, locale)
+  for (const { word, locale } of segmentsMissingFont) {
+    const code = detectLanguageCode(word, locale).join('|')
     wordsByCode[code] = wordsByCode[code] || ''
     wordsByCode[code] += word
   }

@@ -1,8 +1,7 @@
-import React from 'react'
 import { it, describe, expect } from 'vitest'
 
-import { initFonts, toImage } from './utils'
-import satori from '../src'
+import { initFonts, toImage } from './utils.js'
+import satori from '../src/index.js'
 
 describe('SVG', () => {
   let fonts
@@ -225,20 +224,20 @@ describe('SVG', () => {
 
   it('should render svg prefer size props rather than viewBox', async () => {
     const svg = await satori(
-      <div style={{
-        width: '100px',
-        height: '100px',
-        background: '#8250df',
-        display: 'flex'
-      }}>
-        <svg xmlns='http://www.w3.org/2000/svg' width='60' viewBox='0 0 100 100'>
-          <circle
-            cx='50'
-            cy='50'
-            r='50'
-            fill='red'
-          />
-
+      <div
+        style={{
+          width: '100px',
+          height: '100px',
+          background: '#8250df',
+          display: 'flex',
+        }}
+      >
+        <svg
+          xmlns='http://www.w3.org/2000/svg'
+          width='60'
+          viewBox='0 0 100 100'
+        >
+          <circle cx='50' cy='50' r='50' fill='red' />
         </svg>
       </div>,
       { width: 100, height: 100, fonts }
@@ -276,26 +275,49 @@ describe('SVG', () => {
     )
     expect(toImage(svg, 100)).toMatchImageSnapshot()
   })
-  
+
   it('should render svg without viewBox', async () => {
     const svg = await satori(
-      <div style={{
-        width: '100px',
-        height: '100px',
-        background: '#1a73e8',
-        display: 'flex'
-      }}>
+      <div
+        style={{
+          width: '100px',
+          height: '100px',
+          background: '#1a73e8',
+          display: 'flex',
+        }}
+      >
         <svg xmlns='http://www.w3.org/2000/svg' width='30' height='30'>
-          <circle
-            cx='50'
-            cy='50'
-            r='50'
-            fill='red'
-          />
+          <circle cx='50' cy='50' r='50' fill='red' />
         </svg>
       </div>,
       { width: 100, height: 100, fonts }
     )
+    expect(toImage(svg, 100)).toMatchImageSnapshot()
+  })
+
+  // TODO wait for @resvg/resvg-js to support mask-type
+  it('should respect style on svg node', async () => {
+    const svg = await satori(
+      <div
+        style={{
+          height: '100%',
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#fff',
+          fontSize: 32,
+          fontWeight: 600,
+        }}
+      >
+        <svg xmlns='http://www.w3.org/2000/svg' width='30' height='30'>
+          <circle cx='50' cy='50' r='50' style={{ fill: 'gold' }} />
+        </svg>
+      </div>,
+      { width: 100, height: 100, fonts }
+    )
+
     expect(toImage(svg, 100)).toMatchImageSnapshot()
   })
 })

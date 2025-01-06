@@ -2,19 +2,42 @@
  * This class handles everything related to fonts.
  */
 import opentype from '@shuding/opentype.js'
-import { Locale, locales, isValidLocale } from './language'
+import { Locale, locales, isValidLocale } from './language.js'
 
 export type Weight = 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 900
-type WeightName = 'normal' | 'bold'
-export type Style = 'normal' | 'italic'
+export type WeightName = 'normal' | 'bold'
+export type FontWeight = Weight | WeightName
+export type FontStyle = 'normal' | 'italic'
 const SUFFIX_WHEN_LANG_NOT_SET = 'unknown'
 
 export interface FontOptions {
   data: Buffer | ArrayBuffer
   name: string
   weight?: Weight
-  style?: Style
+  style?: FontStyle
   lang?: string
+}
+
+export type FontEngine = {
+  has: (s: string) => boolean
+  baseline: (s?: string, resolvedFont?: any) => number
+  height: (s?: string, resolvedFont?: any) => number
+  measure: (
+    s: string,
+    style: {
+      fontSize: number
+      letterSpacing: number
+    }
+  ) => number
+  getSVG: (
+    s: string,
+    style: {
+      fontSize: number
+      top: number
+      left: number
+      letterSpacing: number
+    }
+  ) => string
 }
 
 function compareFont(
@@ -66,7 +89,7 @@ function compareFont(
 
 export default class FontLoader {
   defaultFont: opentype.Font
-  fonts = new Map<string, [opentype.Font, Weight?, Style?][]>()
+  fonts = new Map<string, [opentype.Font, Weight?, FontStyle?][]>()
   constructor(fontOptions: FontOptions[]) {
     this.addFonts(fontOptions)
   }
@@ -79,7 +102,7 @@ export default class FontLoader {
   }: {
     name: string
     weight: Weight | WeightName
-    style: Style
+    style: FontStyle
   }) {
     if (!this.fonts.has(name)) {
       return null
@@ -160,18 +183,18 @@ export default class FontLoader {
 
   public getEngine(
     fontSize = 16,
-    lineHeight = 1.2,
+    lineHeight: number | string = 'normal',
     {
-      fontFamily,
+      fontFamily = 'sans-serif',
       fontWeight = 400,
       fontStyle = 'normal',
     }: {
-      fontFamily: string | string[]
-      fontWeight?: Weight | WeightName
-      fontStyle?: Style
+      fontFamily?: string | string[]
+      fontWeight?: FontWeight
+      fontStyle?: FontStyle
     },
     locale: Locale | undefined
-  ) {
+  ): FontEngine {
     if (!this.fonts.size) {
       throw new Error(
         'No fonts are loaded. At least one font is required to calculate the layout.'
@@ -181,15 +204,29 @@ export default class FontLoader {
     fontFamily = (Array.isArray(fontFamily) ? fontFamily : [fontFamily]).map(
       (name) => name.toLowerCase()
     )
-    const fonts = fontFamily
-      .map((face) =>
-        this.get({
-          name: face,
-          weight: fontWeight,
-          style: fontStyle,
-        })
-      )
-      .filter(Boolean)
+    const fonts = []
+    fontFamily.forEach((face) => {
+      const getNormal = this.get({
+        name: face,
+        weight: fontWeight,
+        style: fontStyle,
+      })
+      if (getNormal) {
+        fonts.push(getNormal)
+        return
+      }
+
+      const getUnknown = this.get({
+        name: face + '_unknown',
+        weight: fontWeight,
+        style: fontStyle,
+      })
+
+      if (getUnknown) {
+        fonts.push(getUnknown)
+        return
+      }
+    })
 
     // Add additional fonts as the fallback.
     const keys = Array.from(this.fonts.keys())
@@ -240,15 +277,22 @@ export default class FontLoader {
 
     const cachedFontResolver = new Map<number, opentype.Font | undefined>()
     const resolveFont = (word: string, fallback = true) => {
-      const code = word.charCodeAt(0)
-      if (cachedFontResolver.has(code)) return cachedFontResolver.get(code)
-
       const _fonts = [
         ...fonts,
         ...additionalFonts,
         ...specifiedLangFonts,
         ...(fallback ? nonSpecifiedLangFonts : []),
       ]
+
+      if (typeof word === 'undefined') {
+        if (fallback) {
+          return _fonts[_fonts.length - 1]
+        }
+        return undefined
+      }
+
+      const code = word.charCodeAt(0)
+      if (cachedFontResolver.has(code)) return cachedFontResolver.get(code)
 
       const font = _fonts.find((_font, index) => {
         return (
@@ -270,11 +314,26 @@ export default class FontLoader {
         resolvedFont.ascender
       return (_ascender / resolvedFont.unitsPerEm) * fontSize
     }
+
     const descender = (resolvedFont: opentype.Font, useOS2Table = false) => {
       const _descender =
         (useOS2Table ? resolvedFont.tables?.os2?.sTypoDescender : 0) ||
         resolvedFont.descender
       return (_descender / resolvedFont.unitsPerEm) * fontSize
+    }
+
+    const height = (resolvedFont: opentype.Font, useOS2Table = false) => {
+      if ('string' === typeof lineHeight && 'normal' === lineHeight) {
+        const _lineGap =
+          (useOS2Table ? resolvedFont.tables?.os2?.sTypoLineGap : 0) || 0
+        return (
+          ascender(resolvedFont, useOS2Table) -
+          descender(resolvedFont, useOS2Table) +
+          (_lineGap / resolvedFont.unitsPerEm) * fontSize
+        )
+      } else if ('number' === typeof lineHeight) {
+        return fontSize * lineHeight
+      }
     }
 
     const resolve = (s: string) => {
@@ -296,36 +355,36 @@ export default class FontLoader {
         s?: string,
         resolvedFont = typeof s === 'undefined' ? fonts[0] : resolveFont(s)
       ) => {
-        // https://www.w3.org/TR/css-inline-3/#css-metrics
-        // https://www.w3.org/TR/CSS2/visudet.html#leading
-        // Note. It is recommended that implementations that use OpenType or
-        // TrueType fonts use the metrics "sTypoAscender" and "sTypoDescender"
-        // from the font's OS/2 table for A and D (after scaling to the current
-        // element's font size). In the absence of these metrics, the "Ascent"
-        // and "Descent" metrics from the HHEA table should be used.
-        const A = ascender(resolvedFont, true)
-        const D = descender(resolvedFont, true)
-        const glyphHeight = engine.height(s, resolvedFont)
-        const { yMax, yMin } = resolvedFont.tables.head
+        const asc = ascender(resolvedFont)
+        const desc = descender(resolvedFont)
+        const contentHeight = asc - desc
 
-        const sGlyphHeight = A - D
-        const baselineOffset = (yMax / (yMax - yMin) - 1) * sGlyphHeight
-
-        return glyphHeight * ((1.2 / lineHeight + 1) / 2) + baselineOffset
+        return asc + (height(resolvedFont) - contentHeight) / 2
       },
       height: (
         s?: string,
         resolvedFont = typeof s === 'undefined' ? fonts[0] : resolveFont(s)
       ) => {
-        return (
-          (ascender(resolvedFont) - descender(resolvedFont)) *
-          (lineHeight / 1.2)
-        )
+        return height(resolvedFont)
       },
-      measure: (s: string, style: any) => {
+      measure: (
+        s: string,
+        style: {
+          fontSize: number
+          letterSpacing: number
+        }
+      ) => {
         return this.measure(resolveFont, s, style)
       },
-      getSVG: (s: string, style: any) => {
+      getSVG: (
+        s: string,
+        style: {
+          fontSize: number
+          top: number
+          left: number
+          letterSpacing: number
+        }
+      ) => {
         return this.getSVG(resolveFont, s, style)
       },
     }

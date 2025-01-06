@@ -2,8 +2,9 @@
  * Generate clip path for the given element.
  */
 
-import { buildXMLString } from '../utils'
-import mask from './content-mask'
+import { buildXMLString } from '../utils.js'
+import mask from './content-mask.js'
+import { buildClipPath, genClipPathId } from './clip-path.js'
 
 export default function overflow(
   {
@@ -27,10 +28,46 @@ export default function overflow(
     currentClipPath: string | string
     src?: string
   },
-  style: Record<string, string | number>
+  style: Record<string, string | number>,
+  inheritableStyle: Record<string, string | number>
 ) {
+  let overflowClipPath = ''
+  const clipPath =
+    style.clipPath && style.clipPath !== 'none'
+      ? buildClipPath(
+          { left, top, width, height, path, id, matrix, currentClipPath, src },
+          style as Record<string, number>,
+          inheritableStyle
+        )
+      : ''
+
   if (style.overflow !== 'hidden' && !src) {
-    return ''
+    overflowClipPath = ''
+  } else {
+    const _id = clipPath ? `satori_ocp-${id}` : genClipPathId(id)
+
+    overflowClipPath = buildXMLString(
+      'clipPath',
+      {
+        id: _id,
+        'clip-path': currentClipPath,
+      },
+      buildXMLString(path ? 'path' : 'rect', {
+        x: left,
+        y: top,
+        width,
+        height,
+        d: path ? path : undefined,
+        // add transformation matrix to clip path if overflow is hidden AND a
+        // transformation style is defined, otherwise children will be clipped
+        // relative to the parent's original plane instead of the transformed
+        // plane
+        transform:
+          style.overflow === 'hidden' && style.transform && matrix
+            ? matrix
+            : undefined,
+      })
+    )
   }
 
   const contentMask = mask(
@@ -46,20 +83,5 @@ export default function overflow(
     style
   )
 
-  return (
-    buildXMLString(
-      'clipPath',
-      {
-        id: `satori_cp-${id}`,
-        'clip-path': currentClipPath,
-      },
-      buildXMLString(path ? 'path' : 'rect', {
-        x: left,
-        y: top,
-        width,
-        height,
-        d: path ? path : undefined,
-      })
-    ) + contentMask
-  )
+  return clipPath + overflowClipPath + contentMask
 }

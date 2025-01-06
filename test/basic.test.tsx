@@ -1,8 +1,7 @@
-import React from 'react'
 import { it, describe, expect } from 'vitest'
 
-import { initFonts, toImage } from './utils'
-import satori from '../src'
+import { initFonts, toImage } from './utils.js'
+import satori from '../src/index.js'
 
 describe('Basic', () => {
   let fonts
@@ -106,6 +105,7 @@ describe('Basic', () => {
           display: 'flex',
           height: '100%',
           width: '100%',
+          background: 'white',
         }}
       >
         Hi {0} <div>hi</div> {0} {false} {undefined} {0} {null} {0} {true} {'x'}{' '}

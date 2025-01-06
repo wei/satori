@@ -1,6 +1,7 @@
 import type { ReactNode, ReactElement } from 'react'
 
-import CssDimension from './vendor/parse-css-dimension'
+import CssDimension from './vendor/parse-css-dimension/index.js'
+import LineBreaker from 'linebreak'
 
 export function isReactElement(node: ReactNode): node is ReactElement {
   const type = typeof node
@@ -20,10 +21,7 @@ export function isClass(f: Function) {
 }
 
 export function hasDangerouslySetInnerHTMLProp(props: any) {
-  if ('dangerouslySetInnerHTML' in props) {
-    return true
-  }
-  return false
+  return 'dangerouslySetInnerHTML' in props
 }
 
 export function normalizeChildren(children: any) {
@@ -96,14 +94,7 @@ export function lengthToNumber(
           return parsed.value
       }
     } else if (parsed.type === 'angle') {
-      switch (parsed.unit) {
-        case 'deg':
-          return parsed.value
-        case 'rad':
-          return (parsed.value * 180) / Math.PI
-        default:
-          return parsed.value
-      }
+      return calcDegree(length)
     } else if (parsed.type === 'percentage') {
       if (percentage) {
         return (parsed.value / 100) * baseLength
@@ -111,6 +102,21 @@ export function lengthToNumber(
     }
   } catch {
     // Not a length unit, silently ignore.
+  }
+}
+
+export function calcDegree(deg: string) {
+  const parsed = new CssDimension(deg)
+
+  switch (parsed.unit) {
+    case 'deg':
+      return parsed.value
+    case 'rad':
+      return (parsed.value * 180) / Math.PI
+    case 'turn':
+      return parsed.value * 360
+    case 'grad':
+      return 0.9 * parsed.value
   }
 }
 
@@ -171,20 +177,46 @@ export function segment(
       )
     }
 
-    wordSegmenter = new (Intl as any).Segmenter(locale, { granularity: 'word' })
-    graphemeSegmenter = new (Intl as any).Segmenter(locale, {
+    wordSegmenter = new Intl.Segmenter(locale, { granularity: 'word' })
+    graphemeSegmenter = new Intl.Segmenter(locale, {
       granularity: 'grapheme',
     })
   }
 
-  return granularity === 'word'
-    ? [...wordSegmenter.segment(content)].map((seg) => seg.segment)
-    : [...graphemeSegmenter.segment(content)].map((seg) => seg.segment)
+  if (granularity === 'grapheme') {
+    return [...graphemeSegmenter.segment(content)].map((seg) => seg.segment)
+  } else {
+    const segmented = [...wordSegmenter.segment(content)].map(
+      (seg) => seg.segment
+    ) as string[]
+
+    const output = []
+
+    let i = 0
+    // When there is a non-breaking space, join the previous and next words together.
+    // This change causes them to be treated as a single segment.
+    while (i < segmented.length) {
+      const s = segmented[i]
+
+      if (s == '\u00a0') {
+        const previousWord = i === 0 ? '' : output.pop()
+        const nextWord = i === segmented.length - 1 ? '' : segmented[i + 1]
+
+        output.push(previousWord + '\u00a0' + nextWord)
+        i += 2
+      } else {
+        output.push(s)
+        i++
+      }
+    }
+
+    return output
+  }
 }
 
 export function buildXMLString(
   type: string,
-  attrs: Record<string, any>,
+  attrs: Record<string, string | number>,
   children?: string
 ) {
   let attrString = ''
@@ -219,184 +251,105 @@ export function createLRU<T>(max = 20) {
     store.set(key, entry)
     return entry
   }
+  function clear() {
+    store.clear()
+  }
 
   return {
     set,
     get,
+    clear,
   }
-}
-
-// Based on
-// https://raw.githubusercontent.com/facebook/react/master/packages/react-dom/src/shared/possibleStandardNames.js
-const ATTRIBUTE_MAPPING = {
-  accentHeight: 'accent-height',
-  alignmentBaseline: 'alignment-baseline',
-  arabicForm: 'arabic-form',
-  baselineShift: 'baseline-shift',
-  capHeight: 'cap-height',
-  clipPath: 'clip-path',
-  clipRule: 'clip-rule',
-  colorInterpolation: 'color-interpolation',
-  colorInterpolationFilters: 'color-interpolation-filters',
-  colorProfile: 'color-profile',
-  colorRendering: 'color-rendering',
-  dominantBaseline: 'dominant-baseline',
-  enableBackground: 'enable-background',
-  fillOpacity: 'fill-opacity',
-  fillRule: 'fill-rule',
-  floodColor: 'flood-color',
-  floodOpacity: 'flood-opacity',
-  fontFamily: 'font-family',
-  fontSize: 'font-size',
-  fontSizeAdjust: 'font-size-adjust',
-  fontStretch: 'font-stretch',
-  fontStyle: 'font-style',
-  fontVariant: 'font-variant',
-  fontWeight: 'font-weight',
-  glyphName: 'glyph-name',
-  glyphOrientationHorizontal: 'glyph-orientation-horizontal',
-  glyphOrientationVertical: 'glyph-orientation-vertical',
-  horizAdvX: 'horiz-adv-x',
-  horizOriginX: 'horiz-origin-x',
-  imageRendering: 'image-rendering',
-  letterSpacing: 'letter-spacing',
-  lightingColor: 'lighting-color',
-  markerEnd: 'marker-end',
-  markerMid: 'marker-mid',
-  markerStart: 'marker-start',
-  overlinePosition: 'overline-position',
-  overlineThickness: 'overline-thickness',
-  paintOrder: 'paint-order',
-  panose1: 'panose-1',
-  pointerEvents: 'pointer-events',
-  renderingIntent: 'rendering-intent',
-  shapeRendering: 'shape-rendering',
-  stopColor: 'stop-color',
-  stopOpacity: 'stop-opacity',
-  strikethroughPosition: 'strikethrough-position',
-  strikethroughThickness: 'strikethrough-thickness',
-  strokeDasharray: 'stroke-dasharray',
-  strokeDashoffset: 'stroke-dashoffset',
-  strokeLinecap: 'stroke-linecap',
-  strokeLinejoin: 'stroke-linejoin',
-  strokeMiterlimit: 'stroke-miterlimit',
-  strokeOpacity: 'stroke-opacity',
-  strokeWidth: 'stroke-width',
-  textAnchor: 'text-anchor',
-  textDecoration: 'text-decoration',
-  textRendering: 'text-rendering',
-  underlinePosition: 'underline-position',
-  underlineThickness: 'underline-thickness',
-  unicodeBidi: 'unicode-bidi',
-  unicodeRange: 'unicode-range',
-  unitsPerEm: 'units-per-em',
-  vAlphabetic: 'v-alphabetic',
-  vHanging: 'v-hanging',
-  vIdeographic: 'v-ideographic',
-  vMathematical: 'v-mathematical',
-  vectorEffect: 'vector-effect',
-  vertAdvY: 'vert-adv-y',
-  vertOriginX: 'vert-origin-x',
-  vertOriginY: 'vert-origin-y',
-  wordSpacing: 'word-spacing',
-  writingMode: 'writing-mode',
-  xHeight: 'x-height',
-  xlinkActuate: 'xlink:actuate',
-  xlinkArcrole: 'xlink:arcrole',
-  xlinkHref: 'xlink:href',
-  xlinkRole: 'xlink:role',
-  xlinkShow: 'xlink:show',
-  xlinkTitle: 'xlink:title',
-  xlinkType: 'xlink:type',
-  xmlBase: 'xml:base',
-  xmlLang: 'xml:lang',
-  xmlSpace: 'xml:space',
-  xmlnsXlink: 'xmlns:xlink',
-} as const
-
-// From https://github.com/yoksel/url-encoder/blob/master/src/js/script.js
-const SVGSymbols = /[\r\n%#()<>?[\\\]^`{|}"']/g
-
-function translateSVGNodeToSVGString(
-  node: ReactElement | string | (ReactElement | string)[],
-  inheritedColor: string
-): string {
-  if (!node) return ''
-  if (Array.isArray(node)) {
-    return node
-      .map((n) => translateSVGNodeToSVGString(n, inheritedColor))
-      .join('')
-  }
-  if (typeof node !== 'object') return String(node)
-
-  const type = node.type
-  if (type === 'text') {
-    throw new Error(
-      '<text> nodes are not currently supported, please convert them to <path>'
-    )
-  }
-
-  const { children, style, ...restProps } = node.props || {}
-  const currentColor = style?.color || inheritedColor
-  return `<${type}${Object.entries(restProps)
-    .map(([k, _v]) => {
-      if (typeof _v === 'string' && _v.toLowerCase() === 'currentcolor') {
-        _v = currentColor
-      }
-      return ` ${ATTRIBUTE_MAPPING[k] || k}="${_v}"`
-    })
-    .join('')}>${translateSVGNodeToSVGString(children, currentColor)}</${type}>`
 }
 
 export function parseViewBox(viewBox?: string | null | undefined) {
   return viewBox ? viewBox.split(/[, ]/).filter(Boolean).map(Number) : null
 }
 
-export function SVGNodeToImage(
-  node: ReactElement,
-  inheritedColor: string
-): string {
-  let {
-    viewBox,
-    viewbox,
-    width,
-    height,
-    className,
-    style,
-    children,
-    ...restProps
-  } = node.props || {}
-
-  viewBox ||= viewbox
-
-  // We directly assign the xmlns attribute here to deduplicate.
-  restProps.xmlns = 'http://www.w3.org/2000/svg'
-
-  const currentColor = style?.color || inheritedColor
-  const viewBoxSize = parseViewBox(viewBox)
-
-  // ratio = height / width
-  const ratio = viewBoxSize ? viewBoxSize[3] / viewBoxSize[2] : null
-  width = width || (ratio && height) ? height / ratio : null
-  height = height || (ratio && width) ? width * ratio : null
-
-  restProps.width = width
-  restProps.height = height
-  if (viewBox) restProps.viewBox = viewBox
-
-  return `data:image/svg+xml;utf8,${`<svg ${Object.entries(restProps)
-    .map(([k, _v]) => {
-      if (typeof _v === 'string' && _v.toLowerCase() === 'currentcolor') {
-        _v = currentColor
-      }
-      return ` ${ATTRIBUTE_MAPPING[k] || k}="${_v}"`
-    })
-    .join('')}>${translateSVGNodeToSVGString(
-    children,
-    currentColor
-  )}</svg>`.replace(SVGSymbols, encodeURIComponent)}`
+export function toString(x: unknown): string {
+  return Object.prototype.toString.call(x)
 }
 
 export function isString(x: unknown): x is string {
   return typeof x === 'string'
+}
+
+export function isNumber(x: unknown): x is number {
+  return typeof x === 'number'
+}
+
+export function isUndefined(x: unknown): x is undefined {
+  return toString(x) === '[object Undefined]'
+}
+
+export function splitByBreakOpportunities(
+  content: string,
+  wordBreak: string
+): {
+  words: string[]
+  requiredBreaks: boolean[]
+} {
+  if (wordBreak === 'break-all') {
+    return { words: segment(content, 'grapheme'), requiredBreaks: [] }
+  }
+
+  if (wordBreak === 'keep-all') {
+    return { words: segment(content, 'word'), requiredBreaks: [] }
+  }
+
+  const breaker = new LineBreaker(content)
+  let last = 0
+  let bk = breaker.nextBreak()
+  const words = []
+  const requiredBreaks = [false]
+
+  while (bk) {
+    const word = content.slice(last, bk.position)
+    words.push(word)
+
+    if (bk.required) {
+      requiredBreaks.push(true)
+    } else {
+      requiredBreaks.push(false)
+    }
+
+    last = bk.position
+    bk = breaker.nextBreak()
+  }
+
+  return { words, requiredBreaks }
+}
+
+export const midline = (s: string) => {
+  return s.replaceAll(
+    /([A-Z])/g,
+    (_, letter: string) => `-${letter.toLowerCase()}`
+  )
+}
+
+export function splitEffects(
+  input: string,
+  separator: string | RegExp = ','
+): string[] {
+  const result = []
+  let l = 0
+  let parenCount = 0
+  separator = new RegExp(separator)
+
+  for (let i = 0; i < input.length; i++) {
+    if (input[i] === '(') {
+      parenCount++
+    } else if (input[i] === ')') {
+      parenCount--
+    }
+
+    if (parenCount === 0 && separator.test(input[i])) {
+      result.push(input.slice(l, i).trim())
+      l = i + 1
+    }
+  }
+
+  result.push(input.slice(l).trim())
+
+  return result
 }

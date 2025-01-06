@@ -1,12 +1,14 @@
-import type { ParsedTransformOrigin } from '../transform-origin'
+import type { ParsedTransformOrigin } from '../transform-origin.js'
 
-import backgroundImage from './background-image'
-import radius from './border-radius'
-import { boxShadow } from './shadow'
-import transform from './transform'
-import overflow from './overflow'
-import { buildXMLString } from '../utils'
-import border, { getBorderClipPath } from './border'
+import backgroundImage from './background-image.js'
+import radius, { getBorderRadiusClipPath } from './border-radius.js'
+import { boxShadow } from './shadow.js'
+import transform from './transform.js'
+import overflow from './overflow.js'
+import { buildXMLString } from '../utils.js'
+import border, { getBorderClipPath } from './border.js'
+import { genClipPath } from './clip-path.js'
+import buildMaskImage from './mask-image.js'
 
 export default async function rect(
   {
@@ -28,7 +30,8 @@ export default async function rect(
     src?: string
     debug?: boolean
   },
-  style: Record<string, number | string>
+  style: Record<string, number | string>,
+  inheritableStyle: Record<string, number | string>
 ) {
   if (style.display === 'none') return ''
 
@@ -75,7 +78,8 @@ export default async function rect(
       const background = (style.backgroundImage as any)[index]
       const image = await backgroundImage(
         { id: id + '_' + index, width, height, left, top },
-        background
+        background,
+        inheritableStyle
       )
       if (image) {
         // Background images that come first in the array are rendered last.
@@ -92,6 +96,19 @@ export default async function rect(
     }
   }
 
+  const [miId, mi] = await buildMaskImage(
+    { id, left, top, width, height },
+    style,
+    inheritableStyle
+  )
+
+  defs += mi
+  const maskId = miId
+    ? `url(#${miId})`
+    : style._inheritedMaskId
+    ? `url(#${style._inheritedMaskId})`
+    : undefined
+
   const path = radius(
     { left, top, width, height },
     style as Record<string, number>
@@ -101,7 +118,6 @@ export default async function rect(
   }
 
   const clipPathId = style._inheritedClipPathId as number | undefined
-  const overflowMaskId = style._inheritedMaskId as number | undefined
 
   if (debug) {
     extra = buildXMLString('rect', {
@@ -124,11 +140,14 @@ export default async function rect(
       ? `url(#satori_bct-${id})`
       : clipPathId
       ? `url(#${clipPathId})`
+      : style.clipPath
+      ? genClipPath(id)
       : undefined
 
   const clip = overflow(
     { left, top, width, height, path, id, matrix, currentClipPath, src },
-    style as Record<string, number>
+    style as Record<string, number>,
+    inheritableStyle
   )
 
   // Each background generates a new rectangle.
@@ -144,9 +163,9 @@ export default async function rect(
         fill,
         d: path ? path : undefined,
         transform: matrix ? matrix : undefined,
-        'clip-path': currentClipPath,
+        'clip-path': style.transform ? undefined : currentClipPath,
         style: cssFilter ? `filter:${cssFilter}` : undefined,
-        mask: overflowMaskId ? `url(#${overflowMaskId})` : undefined,
+        mask: style.transform ? undefined : maskId,
       })
     )
     .join('')
@@ -164,6 +183,9 @@ export default async function rect(
     },
     style
   )
+
+  // border radius for images with transform property
+  let imageBorderRadius = undefined
 
   // If it's an image (<img>) tag, we add an extra layer of the image itself.
   if (isImage) {
@@ -188,6 +210,21 @@ export default async function rect(
         ? 'xMidYMid slice'
         : 'none'
 
+    if (style.transform) {
+      imageBorderRadius = getBorderRadiusClipPath(
+        {
+          id,
+          borderRadiusPath: path,
+          borderType: type,
+          left,
+          top,
+          width,
+          height,
+        },
+        style
+      )
+    }
+
     shape += buildXMLString('image', {
       x: left + offsetLeft,
       y: top + offsetTop,
@@ -197,8 +234,16 @@ export default async function rect(
       preserveAspectRatio,
       transform: matrix ? matrix : undefined,
       style: cssFilter ? `filter:${cssFilter}` : undefined,
-      'clip-path': `url(#satori_cp-${id})`,
-      mask: `url(#satori_om-${id})`,
+      'clip-path': style.transform
+        ? imageBorderRadius
+          ? `url(#${imageBorderRadius[1]})`
+          : undefined
+        : `url(#satori_cp-${id})`,
+      mask: style.transform
+        ? undefined
+        : miId
+        ? `url(#${miId})`
+        : `url(#satori_om-${id})`,
     })
   }
 
@@ -241,7 +286,7 @@ export default async function rect(
         d: path ? path : undefined,
         transform: matrix ? matrix : undefined,
         'clip-path': currentClipPath,
-        mask: overflowMaskId ? `url(#${overflowMaskId})` : undefined,
+        mask: maskId,
       }),
     },
     style
@@ -250,9 +295,16 @@ export default async function rect(
   return (
     (defs ? buildXMLString('defs', {}, defs) : '') +
     (shadow ? shadow[0] : '') +
+    (imageBorderRadius ? imageBorderRadius[0] : '') +
     clip +
     (opacity !== 1 ? `<g opacity="${opacity}">` : '') +
+    (style.transform && (currentClipPath || maskId)
+      ? `<g${currentClipPath ? ` clip-path="${currentClipPath}"` : ''}${
+          maskId ? ` mask="${maskId}"` : ''
+        }>`
+      : '') +
     (backgroundShapes || shape) +
+    (style.transform && (currentClipPath || maskId) ? '</g>' : '') +
     (opacity !== 1 ? `</g>` : '') +
     (shadow ? shadow[1] : '') +
     extra

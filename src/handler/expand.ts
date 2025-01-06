@@ -6,10 +6,15 @@
 import { getPropertyName, getStylesForProperty } from 'css-to-react-native'
 import { parseElementStyle } from 'css-background-parser'
 import { parse as parseBoxShadow } from 'css-box-shadow'
+import cssColorParse from 'parse-css-color'
 
-import CssDimension from '../vendor/parse-css-dimension'
-import parseTransformOrigin from '../transform-origin'
-import {isString, lengthToNumber, v} from '../utils'
+import CssDimension from '../vendor/parse-css-dimension/index.js'
+import parseTransformOrigin, {
+  ParsedTransformOrigin,
+} from '../transform-origin.js'
+import { isString, lengthToNumber, v, splitEffects } from '../utils.js'
+import { MaskProperty, parseMask } from '../parser/mask.js'
+import { FontWeight, FontStyle } from '../font.js'
 
 // https://react-cn.github.io/react/tips/style-props-value-px.html
 const optOutPx = new Set([
@@ -42,12 +47,11 @@ function handleFallbackColor(
 }
 
 function purify(name: string, value?: string | number) {
-  if (typeof value === 'number') {
-    if (!optOutPx.has(name)) return value + 'px'
-    if (keepNumber.has(name)) return value
-    return String(value)
-  }
-  return value
+  const num = Number(value)
+  if (isNaN(num)) return value
+  if (!optOutPx.has(name)) return num + 'px'
+  if (keepNumber.has(name)) return num
+  return String(value)
 }
 
 function handleSpecialCase(
@@ -160,10 +164,48 @@ function handleSpecialCase(
 
   if (name === 'background') {
     value = value.toString().trim()
-    if (/^(linear-gradient|radial-gradient|url)\(/.test(value)) {
+    if (
+      /^(linear-gradient|radial-gradient|url|repeating-linear-gradient)\(/.test(
+        value
+      )
+    ) {
       return getStylesForProperty('backgroundImage', value, true)
     }
     return getStylesForProperty('background', value, true)
+  }
+
+  if (name === 'textShadow') {
+    // Handle multiple text shadows if provided.
+    value = value.toString().trim()
+    const result = {}
+
+    const shadows = splitEffects(value)
+
+    for (const shadow of shadows) {
+      const styles = getStylesForProperty('textShadow', shadow, true)
+      for (const k in styles) {
+        if (!result[k]) {
+          result[k] = [styles[k]]
+        } else {
+          result[k].push(styles[k])
+        }
+      }
+    }
+
+    return result
+  }
+
+  if (name === 'WebkitTextStroke') {
+    value = value.toString().trim()
+    const values = value.split(' ')
+    if (values.length !== 2) {
+      throw new Error('Invalid `WebkitTextStroke` value.')
+    }
+
+    return {
+      WebkitTextStrokeWidth: purify(name, values[0]),
+      WebkitTextStrokeColor: purify(name, values[1]),
+    }
   }
 
   return
@@ -198,21 +240,72 @@ function normalizeColor(value: string | object) {
   return value
 }
 
+type MainStyle = {
+  color: string
+  fontSize: number
+  transformOrigin: ParsedTransformOrigin
+  maskImage: MaskProperty[]
+  opacity: number
+  textTransform: string
+  whiteSpace: string
+  wordBreak: string
+  textAlign: string
+  lineHeight: number | string
+  letterSpacing: number
+
+  fontFamily: string | string[]
+  fontWeight: FontWeight
+  fontStyle: FontStyle
+
+  borderTopWidth: number
+  borderLeftWidth: number
+  borderRightWidth: number
+  borderBottomWidth: number
+
+  paddingTop: number
+  paddingLeft: number
+  paddingRight: number
+  paddingBottom: number
+
+  flexGrow: number
+  flexShrink: number
+
+  gap: number
+  rowGap: number
+  columnGap: number
+
+  textShadowOffset: {
+    width: number
+    height: number
+  }[]
+  textShadowColor: string[]
+  textShadowRadius: number[]
+  WebkitTextStrokeWidth: number
+  WebkitTextStrokeColor: string
+}
+
+type OtherStyle = Exclude<Record<PropertyKey, string | number>, keyof MainStyle>
+
+export type SerializedStyle = Partial<MainStyle & OtherStyle>
+
 export default function expand(
   style: Record<string, string | number> | undefined,
-  inheritedStyle: Record<string, string | number>
-): Record<string, string | number> {
-  const transformedStyle = {} as any
+  inheritedStyle: SerializedStyle
+): SerializedStyle {
+  const serializedStyle: SerializedStyle = {}
 
   if (style) {
-    const currentColor = getCurrentColor(style.color as string, inheritedStyle.color as string)
+    const currentColor = getCurrentColor(
+      style.color as string,
+      inheritedStyle.color
+    )
 
-    transformedStyle.color = currentColor
+    serializedStyle.color = currentColor
 
     for (const prop in style) {
       // Internal properties.
       if (prop.startsWith('_')) {
-        transformedStyle[prop] = style[prop]
+        serializedStyle[prop] = style[prop]
         continue
       }
 
@@ -233,66 +326,53 @@ export default function expand(
             currentColor
           )
 
-        Object.assign(transformedStyle, resolvedStyle)
+        Object.assign(serializedStyle, resolvedStyle)
       } catch (err) {
         throw new Error(
           err.message +
-          // Attach the extra information of the rule itself if it's not included in
-          // the error message.
-          (err.message.includes(value)
-            ? '\n  ' + getErrorHint(name)
-            : `\n  in CSS rule \`${name}: ${value}\`.${getErrorHint(
-              name
-            )}`)
+            // Attach the extra information of the rule itself if it's not included in
+            // the error message.
+            (err.message.includes(value)
+              ? '\n  ' + getErrorHint(name)
+              : `\n  in CSS rule \`${name}: ${value}\`.${getErrorHint(name)}`)
         )
       }
     }
   }
 
   // Parse background images.
-  if (transformedStyle.backgroundImage) {
-    const { backgrounds } = parseElementStyle(transformedStyle)
-    transformedStyle.backgroundImage = backgrounds
+  if (serializedStyle.backgroundImage) {
+    const { backgrounds } = parseElementStyle(serializedStyle)
+    serializedStyle.backgroundImage = backgrounds
+  }
+
+  if (serializedStyle.maskImage || serializedStyle['WebkitMaskImage']) {
+    serializedStyle.maskImage = parseMask(serializedStyle)
   }
 
   // Calculate the base font size.
-  let baseFontSize: number =
-    typeof transformedStyle.fontSize === 'number'
-      ? transformedStyle.fontSize
-      : inheritedStyle.fontSize
-  if (typeof baseFontSize === 'string') {
-    try {
-      const parsed = new CssDimension(baseFontSize)
-      switch (parsed.unit) {
-        case 'em':
-          baseFontSize = parsed.value * (inheritedStyle.fontSize as number)
-          break
-        case 'rem':
-          baseFontSize = parsed.value * 16
-          break
-      }
-    } catch (err) {
-      baseFontSize = 16
-    }
-  }
-  if (typeof transformedStyle.fontSize !== 'undefined') {
-    transformedStyle.fontSize = baseFontSize
+  const baseFontSize = calcBaseFontSize(
+    serializedStyle.fontSize,
+    inheritedStyle.fontSize
+  )
+  if (typeof serializedStyle.fontSize !== 'undefined') {
+    serializedStyle.fontSize = baseFontSize
   }
 
-  if (transformedStyle.transformOrigin) {
-    transformedStyle.transformOrigin = parseTransformOrigin(
-      transformedStyle.transformOrigin,
+  if (serializedStyle.transformOrigin) {
+    serializedStyle.transformOrigin = parseTransformOrigin(
+      serializedStyle.transformOrigin as any,
       baseFontSize
     )
   }
 
-  for (const prop in transformedStyle) {
-    let value = transformedStyle[prop]
+  for (const prop in serializedStyle) {
+    let value = serializedStyle[prop]
 
     // Line height needs to be relative.
     if (prop === 'lineHeight') {
-      if (typeof value === 'string') {
-        value = transformedStyle[prop] =
+      if (typeof value === 'string' && value !== 'normal') {
+        value = serializedStyle[prop] =
           lengthToNumber(
             value,
             baseFontSize,
@@ -310,25 +390,26 @@ export default function expand(
           baseFontSize,
           inheritedStyle
         )
-        if (typeof len !== 'undefined') transformedStyle[prop] = len
-        value = transformedStyle[prop]
+        if (typeof len !== 'undefined') serializedStyle[prop] = len
+        value = serializedStyle[prop]
       }
 
       if (typeof value === 'string' || typeof value === 'object') {
         const color = normalizeColor(value)
-        if (color) transformedStyle[prop] = color
-        value = transformedStyle[prop]
+        if (color) {
+          serializedStyle[prop] = color as any
+        }
+        value = serializedStyle[prop]
       }
     }
 
     // Inherit the opacity.
-    if (prop === 'opacity') {
-      value = transformedStyle[prop] =
-        value * (inheritedStyle.opacity as number)
+    if (prop === 'opacity' && typeof value === 'number') {
+      serializedStyle.opacity = value * inheritedStyle.opacity
     }
 
     if (prop === 'transform') {
-      const transforms = value as { [type: string]: number | string }[]
+      const transforms = value as any as { [type: string]: number | string }[]
 
       for (const transform of transforms) {
         const type = Object.keys(transform)[0]
@@ -343,24 +424,96 @@ export default function expand(
         transform[type] = len
       }
     }
+
+    if (prop === 'textShadowRadius') {
+      const textShadowRadius = value as unknown as Array<number | string>
+
+      serializedStyle.textShadowRadius = textShadowRadius.map((_v) =>
+        lengthToNumber(_v, baseFontSize, 0, inheritedStyle, false)
+      )
+    }
+
+    if (prop === 'textShadowOffset') {
+      const textShadowOffset = value as unknown as Array<{
+        width: number | string
+        height: number | string
+      }>
+
+      serializedStyle.textShadowOffset = textShadowOffset.map(
+        ({ height, width }) => ({
+          height: lengthToNumber(
+            height,
+            baseFontSize,
+            0,
+            inheritedStyle,
+            false
+          ),
+          width: lengthToNumber(width, baseFontSize, 0, inheritedStyle, false),
+        })
+      )
+    }
   }
 
-  return transformedStyle
+  return serializedStyle
 }
 
-function getCurrentColor(color: string | undefined, inheritedColor: string) {
+function calcBaseFontSize(
+  size: number | string,
+  inheritedSize: number
+): number {
+  if (typeof size === 'number') return size
+
+  try {
+    const parsed = new CssDimension(size)
+    switch (parsed.unit) {
+      case 'em':
+        return parsed.value * inheritedSize
+      case 'rem':
+        return parsed.value * 16
+    }
+  } catch (err) {
+    return inheritedSize
+  }
+}
+
+/**
+ * @see https://github.com/RazrFalcon/resvg/issues/579
+ */
+function refineHSL(color: string) {
+  if (color.startsWith('hsl')) {
+    const t = cssColorParse(color)
+    const [h, s, l] = t.values
+
+    return `hsl(${[h, `${s}%`, `${l}%`]
+      .concat(t.alpha === 1 ? [] : [t.alpha])
+      .join(',')})`
+  }
+
+  return color
+}
+
+function getCurrentColor(
+  color: string | undefined,
+  inheritedColor: string
+): string {
   if (color && color.toLowerCase() !== 'currentcolor') {
-    return color
+    return refineHSL(color)
   }
 
-  return inheritedColor
+  return refineHSL(inheritedColor)
 }
 
-function convertCurrentColorToActualValue(value: string, currentColor: string): string {
-  return value.replace(/currentcolor/ig, currentColor)
+function convertCurrentColorToActualValue(
+  value: string,
+  currentColor: string
+): string {
+  return value.replace(/currentcolor/gi, currentColor)
 }
 
-function preprocess(value: string | number, currentColor: string): string | number {
+function preprocess(
+  value: string | number,
+  currentColor: string
+): string | number {
   if (isString(value)) {
     value = convertCurrentColorToActualValue(value, currentColor)
   }

@@ -1,8 +1,7 @@
-import React from 'react'
 import { it, describe, expect } from 'vitest'
 
-import { initFonts, toImage } from './utils'
-import satori from '../src'
+import { initFonts, toImage } from './utils.js'
+import satori from '../src/index.js'
 
 // TODO: no support for 'text-decoration' or 'outline'
 
@@ -234,7 +233,9 @@ describe('Color Models', () => {
           <div style={{ display: 'flex', backgroundColor: 'currentcolor' }}>
             <span style={{ color: 'white' }}>pink background</span>
           </div>
-          <div style={{ display: 'flex', backgroundColor: 'gray', padding: '4px' }}>
+          <div
+            style={{ display: 'flex', backgroundColor: 'gray', padding: '4px' }}
+          >
             <div style={{ display: 'flex', backgroundColor: 'currentcolor' }}>
               <span style={{ color: 'white' }}>pink background</span>
             </div>
@@ -261,13 +262,11 @@ describe('Color Models', () => {
             width: '100%',
           }}
         >
-          <div style={{ border: '1px solid currentcolor' }}>
-            pink border
-          </div>
-          <div style={{ display: 'flex', backgroundColor: 'gray', padding: '4px' }}>
-            <div style={{ border: '1px solid currentcolor' }}>
-              pink border
-            </div>
+          <div style={{ border: '1px solid currentcolor' }}>pink border</div>
+          <div
+            style={{ display: 'flex', backgroundColor: 'gray', padding: '4px' }}
+          >
+            <div style={{ border: '1px solid currentcolor' }}>pink border</div>
           </div>
         </div>,
         {
@@ -278,6 +277,61 @@ describe('Color Models', () => {
       )
       expect(toImage(svg, 100)).toMatchImageSnapshot()
     })
+  })
+
+  it('should support css4 syntax color in hsl', async () => {
+    const svg = await satori(
+      <div
+        style={{
+          fontSize: 16,
+          background: 'white',
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          textAlign: 'center',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <span style={{ color: 'hsl(200deg, 50%, 50%)' }}>A</span>
+        <span style={{ color: 'hsl(200deg, 50%, 50%, 0.6)' }}>A</span>
+        <span style={{ color: 'hsl(200, 50%, 50%)' }}>B</span>
+        <span style={{ color: 'hsl(0.3turn, 50%, 50%)' }}>C</span>
+        <span style={{ color: 'hsl(0.3turn, 50%, 50%, 0.6)' }}>D</span>
+      </div>,
+      {
+        width: 100,
+        height: 100,
+        fonts,
+      }
+    )
+    expect(toImage(svg, 100)).toMatchImageSnapshot()
+  })
+
+  it('should support css4 syntax color in hsl if inherited', async () => {
+    const svg = await satori(
+      <div
+        style={{
+          fontSize: 16,
+          background: 'white',
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          textAlign: 'center',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'hsl(200deg, 50%, 50%)',
+        }}
+      >
+        <span>A</span>
+      </div>,
+      {
+        width: 100,
+        height: 100,
+        fonts,
+      }
+    )
+    expect(toImage(svg, 100)).toMatchImageSnapshot()
   })
 
   // Borders: shorthand, border-bottom-color, border-color, border-left-color, border-right-color, border-top-color

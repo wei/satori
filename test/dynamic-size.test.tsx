@@ -1,8 +1,7 @@
-import React from 'react'
 import { it, describe, expect } from 'vitest'
 
-import { initFonts, toImage } from './utils'
-import satori from '../src'
+import { initFonts, toImage } from './utils.js'
+import satori from '../src/index.js'
 
 describe('Dynamic size', () => {
   let fonts
@@ -25,8 +24,10 @@ describe('Dynamic size', () => {
         Lorem Ipsum is simply dummy text of the printing and typesetting
         industry.
       </div>,
-      { height: 25
-        , fonts }
+      {
+        height: 25,
+        fonts,
+      }
     )
     expect(toImage(svg, 300)).toMatchImageSnapshot()
   })

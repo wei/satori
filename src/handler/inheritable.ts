@@ -1,3 +1,5 @@
+import { SerializedStyle } from './expand.js'
+
 const list = new Set([
   'color',
   'font',
@@ -12,12 +14,15 @@ const list = new Set([
   'textShadowOffset',
   'textShadowColor',
   'textShadowRadius',
+  'WebkitTextStrokeWidth',
+  'WebkitTextStrokeColor',
   'textDecorationLine',
   'textDecorationStyle',
   'textDecorationColor',
   'whiteSpace',
   'transform',
   'wordBreak',
+  'tabSize',
 
   // Special case: SVG doesn't apply these to children elements so we need to
   // make it inheritable here.
@@ -32,8 +37,8 @@ const list = new Set([
   '_inheritedBackgroundClipTextPath',
 ])
 
-export default function inheritable(style: Record<string, any>) {
-  const inheritedStyle: Record<string, any> = {}
+export default function inheritable(style: SerializedStyle): SerializedStyle {
+  const inheritedStyle: SerializedStyle = {}
   for (const prop in style) {
     if (list.has(prop)) {
       inheritedStyle[prop] = style[prop]

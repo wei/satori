@@ -1,8 +1,7 @@
-import React from 'react'
 import { it, describe, expect } from 'vitest'
 
-import { initFonts, toImage } from './utils'
-import satori from '../src'
+import { initFonts, toImage } from './utils.js'
+import satori from '../src/index.js'
 
 describe('white-space', () => {
   let fonts
@@ -10,13 +9,19 @@ describe('white-space', () => {
 
   describe('normal', () => {
     it('should not render extra spaces with `white-space: normal`', async () => {
+      const EnSpace = String.fromCodePoint(Number('0x2002'))
+
       const svg = await satori(
         <div
           style={{
             whiteSpace: 'normal',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          {' hello '}
+          <div>{'hello'}</div>
+          <div>{' hello '}</div>
+          <div>{EnSpace + 'hello'}</div>
         </div>,
         {
           width: 100,
@@ -62,6 +67,25 @@ describe('white-space', () => {
         }
       )
       expect(toImage(svg, 20)).toMatchImageSnapshot()
+    })
+
+    it('Should have line break before fast.!!!!!!!!!!!!!!!!!', async () => {
+      const svg = await satori(
+        <div
+          style={{
+            backgroundColor: '#fff',
+          }}
+        >
+          Taking a look at Vercels new library to generate dynamic OpenGraph
+          images on the fly it is fast.!!!!!!!!!!!!!!!!!
+        </div>,
+        {
+          width: 340,
+          height: 60,
+          fonts,
+        }
+      )
+      expect(toImage(svg, 400)).toMatchImageSnapshot()
     })
   })
 

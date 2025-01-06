@@ -3,27 +3,28 @@
  */
 
 import type { ReactNode } from 'react'
-import type { YogaNode } from 'yoga-layout'
+import type { Node as YogaNode } from 'yoga-wasm-web'
 
-import getYoga from './yoga'
+import getYoga from './yoga/index.js'
 import {
   isReactElement,
   isClass,
   buildXMLString,
-  SVGNodeToImage,
   normalizeChildren,
   hasDangerouslySetInnerHTMLProp,
-} from './utils'
-import handler from './handler'
-import FontLoader from './font'
-import layoutText from './text'
-import rect from './builder/rect'
-import {Locale, normalizeLocale} from "./language";
+} from './utils.js'
+import { SVGNodeToImage } from './handler/preprocess.js'
+import computeStyle from './handler/compute.js'
+import FontLoader from './font.js'
+import buildTextNodes from './text/index.js'
+import rect from './builder/rect.js'
+import { Locale, normalizeLocale } from './language.js'
+import { SerializedStyle } from './handler/expand.js'
 
 export interface LayoutContext {
   id: string
-  parentStyle: Record<string, number | string>
-  inheritedStyle: Record<string, number | string>
+  parentStyle: SerializedStyle
+  inheritedStyle: SerializedStyle
   isInheritingTransform?: boolean
   parent: YogaNode
   font: FontLoader
@@ -31,15 +32,32 @@ export interface LayoutContext {
   debug?: boolean
   graphemeImages?: Record<string, string>
   canLoadAdditionalAssets: boolean
-  locale?: Locale,
+  locale?: Locale
   getTwStyles: (tw: string, style: any) => any
+  onNodeDetected?: (node: SatoriNode) => void
+}
+
+export interface SatoriNode {
+  // Layout information.
+  left: number
+  top: number
+  width: number
+  height: number
+  type: string
+  key?: string | number
+  props: Record<string, any>
+  textContent?: string
 }
 
 export default async function* layout(
   element: ReactNode,
   context: LayoutContext
-): AsyncGenerator<{ word: string; locale?: string; }[], string, [number, number]> {
-  const Yoga = getYoga()
+): AsyncGenerator<
+  { word: string; locale?: string }[],
+  string,
+  [number, number]
+> {
+  const Yoga = await getYoga()
   const {
     id,
     inheritedStyle,
@@ -60,14 +78,14 @@ export default async function* layout(
     return ''
   }
 
-  // Not a normal element.
+  // Not a regular element.
   if (!isReactElement(element) || typeof element.type === 'function') {
     let iter: ReturnType<typeof layout>
 
     if (!isReactElement(element)) {
       // Process as text node.
-      iter = layoutText(String(element), context)
-      yield (await iter.next()).value as { word: string; locale?: Locale; }[]
+      iter = buildTextNodes(String(element), context)
+      yield (await iter.next()).value as { word: string; locale?: Locale }[]
     } else {
       if (isClass(element.type as Function)) {
         throw new Error('Class component is not supported.')
@@ -77,7 +95,7 @@ export default async function* layout(
       // So we can safely evaluate it to render. Otherwise, an error will be
       // thrown by React.
       iter = layout((element.type as Function)(element.props), context)
-      yield (await iter.next()).value as { word: string; locale?: string; }[]
+      yield (await iter.next()).value as { word: string; locale?: string }[]
     }
 
     await iter.next()
@@ -104,14 +122,13 @@ export default async function* layout(
   const node = Yoga.Node.create()
   parent.insertChild(node, parent.getChildCount())
 
-  const [computedStyle, newInheritableStyle] = await handler(
+  const [computedStyle, newInheritableStyle] = await computeStyle(
     node,
     type,
     inheritedStyle,
     style,
     props
   )
-
   // Post-process styles to attach inheritable properties for Satori.
 
   // If the element is inheriting the parent `transform`, or applying its own.
@@ -122,11 +139,18 @@ export default async function* layout(
     ;(computedStyle.transform as any).__parent = inheritedStyle.transform
   }
 
-  // If the element has `overflow` set to `hidden`, we need to create a clip
+  // If the element has `overflow` set to `hidden` or clip-path is set, we need to create a clip
   // path and use it in all its children.
-  if (computedStyle.overflow === 'hidden') {
+  if (
+    computedStyle.overflow === 'hidden' ||
+    (computedStyle.clipPath && computedStyle.clipPath !== 'none')
+  ) {
     newInheritableStyle._inheritedClipPathId = `satori_cp-${id}`
     newInheritableStyle._inheritedMaskId = `satori_om-${id}`
+  }
+
+  if (computedStyle.maskImage) {
+    newInheritableStyle._inheritedMaskId = `satori_mi-${id}`
   }
 
   // If the element has `background-clip: text` set, we need to create a clip
@@ -142,7 +166,7 @@ export default async function* layout(
   const iterators: ReturnType<typeof layout>[] = []
 
   let i = 0
-  const segmentsMissingFont: { word: string; locale?: string; }[] = []
+  const segmentsMissingFont: { word: string; locale?: string }[] = []
   for (const child of normalizedChildren) {
     const iter = layout(child, {
       id: id + '-' + i++,
@@ -157,6 +181,7 @@ export default async function* layout(
       canLoadAdditionalAssets,
       locale: newLocale,
       getTwStyles,
+      onNodeDetected: context.onNodeDetected,
     })
     if (canLoadAdditionalAssets) {
       segmentsMissingFont.push(...(((await iter.next()).value as any) || []))
@@ -170,9 +195,7 @@ export default async function* layout(
 
   // 3. Post-process the node.
   const [x, y] = yield
-
   let { left, top, width, height } = node.getComputedLayout()
-
   // Attach offset to the current node.
   left += x
   top += y
@@ -180,6 +203,21 @@ export default async function* layout(
   let childrenRenderResult = ''
   let baseRenderResult = ''
   let depsRenderResult = ''
+
+  // Emit event for the current node. We don't pass the children prop to the
+  // event handler because everything is already flattened, unless it's a text
+  // node.
+  const { children: childrenNode, ...restProps } = props
+  context.onNodeDetected?.({
+    left,
+    top,
+    width,
+    height,
+    type,
+    props: restProps,
+    key: element.key,
+    textContent: isReactElement(childrenNode) ? undefined : childrenNode,
+  })
 
   // Generate the rendered markup for the current node.
   if (type === 'img') {
@@ -195,13 +233,14 @@ export default async function* layout(
         isInheritingTransform,
         debug,
       },
-      computedStyle
+      computedStyle,
+      newInheritableStyle
     )
   } else if (type === 'svg') {
     // When entering a <svg> node, we need to convert it to a <img> with the
     // SVG data URL embedded.
-    const currentColor = computedStyle.color as string
-    const src = SVGNodeToImage(element, currentColor)
+    const currentColor = computedStyle.color
+    const src = await SVGNodeToImage(element, currentColor)
     baseRenderResult = await rect(
       {
         id,
@@ -213,7 +252,8 @@ export default async function* layout(
         isInheritingTransform,
         debug,
       },
-      computedStyle
+      computedStyle,
+      newInheritableStyle
     )
   } else {
     const display = style?.display
@@ -230,7 +270,8 @@ export default async function* layout(
     }
     baseRenderResult = await rect(
       { id, left, top, width, height, isInheritingTransform, debug },
-      computedStyle
+      computedStyle,
+      newInheritableStyle
     )
   }
 

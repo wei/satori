@@ -1,8 +1,7 @@
-import React from 'react'
 import { it, describe, expect } from 'vitest'
 
-import { initFonts, toImage } from './utils'
-import satori from '../src'
+import { initFonts, toImage } from './utils.js'
+import satori from '../src/index.js'
 
 describe('Shadow', () => {
   let fonts
@@ -152,6 +151,85 @@ describe('Shadow', () => {
         ></div>,
         { width: 100, height: 100, fonts }
       )
+      expect(toImage(svg, 100)).toMatchImageSnapshot()
+    })
+
+    it('should work correct with zero border radius', async () => {
+      const svg = await satori(
+        <div
+          style={{
+            width: 50,
+            height: 50,
+            margin: '25px 25px',
+            borderRadius: '0%',
+            boxShadow: '0px 0px 0px 10px black',
+          }}
+        ></div>,
+        { width: 100, height: 100, fonts }
+      )
+      expect(toImage(svg, 100)).toMatchImageSnapshot()
+    })
+
+    it('should show box shadow without specifying height', async () => {
+      const svg = await satori(
+        <div
+          style={{
+            display: 'flex',
+            width: 100,
+            padding: 10,
+            background: 'white',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              boxShadow: '10px 10px 10px green',
+              width: `50px`,
+              height: '50px',
+              background: 'rgba(0,0,0,0.5)',
+            }}
+          ></div>
+        </div>,
+        { width: 100, fonts }
+      )
+      expect(toImage(svg, 100)).toMatchImageSnapshot()
+    })
+
+    it('should support multiple text shadows', async () => {
+      const svg = await satori(
+        <div
+          style={{
+            background: 'white',
+            width: 100,
+            height: 100,
+            fontSize: 40,
+            textShadow: '2px 2px 2px red, 4px .25rem .25rem blue',
+          }}
+        >
+          Hello
+        </div>,
+        { width: 100, height: 100, fonts }
+      )
+      expect(toImage(svg, 100)).toMatchImageSnapshot()
+    })
+
+    it('should support text shadows if exist unexpected comma', async () => {
+      const svg = await satori(
+        <div
+          style={{
+            background: 'white',
+            width: 100,
+            height: 100,
+            fontSize: 40,
+            textShadow:
+              '2px 2px red, 4px 4px #4bf542, 6px 6px rgb(186, 147, 17)',
+          }}
+        >
+          Lynn
+        </div>,
+        { width: 100, height: 100, fonts }
+      )
+
       expect(toImage(svg, 100)).toMatchImageSnapshot()
     })
   })
